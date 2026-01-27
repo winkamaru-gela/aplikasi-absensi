@@ -3,7 +3,7 @@ import {
   Users, FileText, LogOut, Printer, Save, Calendar, Clock, 
   UserCheck, CheckCircle, Search, Trash2, Edit, 
   Settings, Upload, Download, ChevronDown, ChevronRight, Key, 
-  RefreshCcw, FileDown, XCircle, Menu, X, LayoutDashboard, Activity, Briefcase, Lock, Shield, Clipboard, ChevronLeft, AlertTriangle
+  RefreshCcw, FileDown, XCircle, Menu, X, LayoutDashboard, Activity, Briefcase, Lock, Shield, Clipboard, ChevronLeft, AlertTriangle, ArrowDownCircle
 } from 'lucide-react';
 
 // --- FIREBASE CONFIGURATION ---
@@ -25,7 +25,8 @@ import {
   onSnapshot, 
   writeBatch,
   query,
-  where
+  where,
+  getDocs
 } from "firebase/firestore";
 
 // --- KONFIGURASI DATABASE (MANUAL) ---
@@ -41,7 +42,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-// Menggunakan 'default-app-id' atau ID statis untuk konsistensi data di database eksternal Anda
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // Default Data
@@ -68,7 +68,6 @@ const INITIAL_SETTINGS = {
   parentAgency: 'Pemerintah Kabupaten Pulau Taliabu',
   address: 'Jl. Merdeka No. 1, Bobong, Pulau Taliabu',
   logoUrl: DEFAULT_LOGO_URL,
-  // Field Baru untuk Penandatangan
   kepalaName: '',
   kepalaNip: '',
   kepalaJabatan: 'Kepala BPKAD'
@@ -166,24 +165,30 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch Data Realtime
+  // Seed Admin Check (One Time)
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const seedAdminIfEmpty = async () => {
+       try {
+         const usersRef = getCollectionPath('users');
+         const snapshot = await getDocs(usersRef);
+         if (snapshot.empty) {
+            const adminRef = doc(usersRef, 'admin_master');
+            await setDoc(adminRef, INITIAL_ADMIN);
+         }
+       } catch (error) { console.error(error); }
+    };
+    seedAdminIfEmpty();
+  }, [firebaseUser]);
+
+  // Fetch Data (Optimized Loading)
   useEffect(() => {
     if (!firebaseUser) return;
 
-    // Use onSnapshot for real-time updates
     const unsubEmp = onSnapshot(getCollectionPath('users'), (snap) => {
       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (data.length === 0) {
-         // Create initial admin if empty
-         const adminRef = doc(getCollectionPath('users'), 'admin_master');
-         setDoc(adminRef, INITIAL_ADMIN);
-      } else {
-         setEmployees(data);
-      }
-      
-      // OPTIMIZATION: Matikan loading segera setelah data User didapat.
-      setLoading(false); 
-      
+      setEmployees(data);
+      setLoading(false); // Optimize loading
     }, (error) => console.error("Error fetching users:", error));
 
     const unsubAtt = onSnapshot(getCollectionPath('attendance'), (snap) => {
@@ -227,7 +232,7 @@ export default function App() {
            <img src={DEFAULT_LOGO_URL} className="w-16 h-16 object-contain animate-bounce" alt="Loading" />
          </div>
       </div>
-      <h2 className="text-xl font-bold text-slate-700 mb-2 tracking-wide">E-ABSENSI</h2>
+      <h2 className="text-xl font-bold text-slate-700 mb-2 tracking-wide">SI-ABSENSI</h2>
       <div className="flex gap-2">
         <div className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
         <div className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
@@ -240,10 +245,10 @@ export default function App() {
   if (!appUser) return <LoginPage onLogin={handleLogin} settings={settings} />;
 
   const isManagement = ['admin', 'operator', 'pengelola'].includes(appUser.role);
-  const isLandscapeMode = activeTab === 'cetak_manual';
-
-  // HITUNG NOTIFIKASI PENDING
   const pendingCount = attendance.filter(l => l.statusApproval === 'pending').length;
+  
+  // Tentukan orientasi cetak berdasarkan tab yang aktif
+  const isLandscape = activeTab === 'cetak_manual';
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col md:flex-row print:bg-white print:block print:h-auto text-slate-800 overflow-hidden">
@@ -275,7 +280,6 @@ export default function App() {
           w-64 h-full
           flex flex-col
       `}>
-         {/* Toggle Button Inside Sidebar (Desktop Only) */}
          <button 
             onClick={() => setIsDesktopSidebarOpen(false)} 
             className="hidden md:flex absolute top-4 right-[-12px] z-50 bg-slate-800 text-white p-1 rounded-full border border-slate-700 shadow-md hover:bg-slate-700"
@@ -296,7 +300,6 @@ export default function App() {
       
       {/* MAIN CONTENT */}
       <main id="main-content" className="flex-1 p-4 md:p-8 overflow-y-auto print:p-0 print:overflow-visible print:h-auto print:block relative">
-        {/* Tombol Buka Sidebar (Desktop Only) */}
         {!isDesktopSidebarOpen && (
            <button 
               onClick={() => setIsDesktopSidebarOpen(true)}
@@ -310,7 +313,7 @@ export default function App() {
         <style>{`
           @media print {
             @page {
-               size: ${isLandscapeMode ? 'landscape' : 'portrait'};
+               size: ${isLandscape ? 'landscape' : 'portrait'};
                margin: 10mm;
             }
             body { 
@@ -362,7 +365,7 @@ export default function App() {
   );
 }
 
-// ... (Komponen LoginPage, SidebarContent, AdminDashboard, AdminInputAbsensi sama seperti sebelumnya)
+// ... LoginPage & SidebarContent (Same as previous) ...
 function LoginPage({ onLogin, settings }) {
   const [u, setU] = useState('');
   const [p, setP] = useState('');
@@ -499,6 +502,8 @@ function SidebarContent({ user, activeTab, setActiveTab, onLogout, settings, pen
     </div>
   );
 }
+
+// ================= ADMIN PAGES =================
 
 function AdminDashboard({ employees, attendance, settings }) {
   const [date, setDate] = useState(getTodayString());
@@ -1008,10 +1013,11 @@ function AdminLaporanHarian({ employees, attendance, settings, holidays }) {
                                   <td className="border border-black p-2 font-bold align-top">KETERANGAN</td>
                                   <td className="border border-black p-2 align-top">
                                       <div className="flex flex-col gap-1">
-                                          <div>1. TUGAS : {dl} Orang</div>
-                                          <div>2. IZIN / CUTI : {izin} / {cuti} Orang</div>
-                                          <div>3. SAKIT : {sakit} Orang</div>
-                                          <div>4. MANGKIR : {alpa} Orang</div>
+                                          <div>1. TUGAS :  {dl}  ORANG</div>
+                                          <div>2. IZIN :  {izin}  ORANG</div>
+                                          <div>3. CUTI :  {cuti}  ORANG</div>
+                                          <div>4. SAKIT :  {sakit}  ORANG</div>
+                                          <div>5. TANPA KETERANGAN : {alpa}  ORANG</div>
                                       </div>
                                   </td>
                               </tr>
@@ -1124,7 +1130,6 @@ function AdminLaporanHarian({ employees, attendance, settings, holidays }) {
   );
 }
 
-// ... (Kode AdminCetakAbsensiManual tetap sama)
 function AdminCetakAbsensiManual({ employees, settings, holidays }) {
   const [startDate, setStartDate] = useState(getTodayString());
   const [endDate, setEndDate] = useState(() => {
@@ -1263,7 +1268,7 @@ function AdminCetakAbsensiManual({ employees, settings, holidays }) {
                         if (pageHolidayList.length > 0) {
                             return (
                                 <>
-                                    <p className="font-bold underline mb-1">Keterangan Hari tidak efektif minggu ini:</p>
+                                    <p className="font-bold underline mb-1">Keterangan Hari Libur Nasional / Cuti Bersama</p>
                                     <ul className="list-none pl-0">
                                         {pageHolidayList.map((h, hIdx) => (
                                             <li key={hIdx} className="mb-0.5">
@@ -1447,7 +1452,34 @@ function AdminTerimaAbsensi({ employees, attendance }) {
 function AdminDataPegawai({ employees, currentUser }) {
   const [form, setForm] = useState({ nama: '', jabatan: '', role: 'user', username: '', password: '', no: '' });
   const [isEditing, setIsEditing] = useState(null);
+  const [isInserting, setIsInserting] = useState(null); // ID pegawai referensi untuk insert
+  const [selectedIds, setSelectedIds] = useState([]); // STATE BARU UNTUK CEKLIST
   const formRef = useRef(null);
+
+  // UTILITY: Fungsi untuk mengurutkan ulang seluruh pegawai dari 1 s/d N
+  const renumberAllEmployees = async () => {
+     // Ambil semua pegawai kecuali admin, urutkan berdasarkan 'no' yang sekarang (convert ke float/int)
+     const userEmployees = employees
+        .filter(e => e.role === 'user')
+        .sort((a,b) => parseFloat(a.no) - parseFloat(b.no));
+     
+     const batch = writeBatch(db);
+     
+     userEmployees.forEach((emp, index) => {
+        const newNo = (index + 1).toString();
+        // Hanya update jika nomornya berubah
+        if (emp.no !== newNo) {
+           batch.update(doc(getCollectionPath('users'), emp.id), { no: newNo });
+        }
+     });
+
+     try {
+        await batch.commit();
+        console.log("Penomoran ulang berhasil.");
+     } catch (err) {
+        console.error("Gagal menomori ulang:", err);
+     }
+  };
 
   const handleImport = (e) => {
     const file = e.target.files[0];
@@ -1458,16 +1490,42 @@ function AdminDataPegawai({ employees, currentUser }) {
        const lines = text.split('\n');
        const batch = writeBatch(db);
        let count = 0;
+       
+       // Skip header (i=1)
        for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
-          const parts = line.split(',');
-          if (parts.length >= 3) {
-             const no = parts[0].trim();
-             const nama = parts[1].trim(); 
-             const jabatan = parts[2].trim();
-             const username = nama.replace(/\s+/g, '').toLowerCase(); 
-             const password = '123';
+          
+          // DETEKSI PEMISAH: Bisa koma (,) atau titik koma (;)
+          const delimiter = line.includes(';') ? ';' : ',';
+          const parts = line.split(delimiter);
+          
+          let no, nama, jabatan;
+
+          if (parts.length === 3) {
+              // Kasus sederhana: No, Nama, Jabatan
+              no = parts[0].trim();
+              nama = parts[1].trim();
+              jabatan = parts[2].trim();
+          } else if (parts.length > 3) {
+              // Kasus nama mengandung koma (misal: "Budi, S.Kom")
+              no = parts[0].trim();
+              jabatan = parts[parts.length - 1].trim();
+              // Gabungkan bagian tengah menjadi Nama
+              // Slice dari index 1 sampai length-1
+              nama = parts.slice(1, parts.length - 1).join(delimiter).trim();
+              
+              // Hapus tanda kutip jika ada (format CSV Excel standar)
+              // Regex: Hapus tanda kutip di awal/akhir, dan ubah double quote ("") jadi single quote (")
+              nama = nama.replace(/^"|"$/g, '').replace(/""/g, '"');
+              jabatan = jabatan.replace(/^"|"$/g, '').replace(/""/g, '"');
+          } else {
+              continue; // Baris tidak valid
+          }
+          
+          if (nama && jabatan) {
+             const username = nama.replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase(); 
+             const password = '123'; // Password default
              const newDocRef = doc(getCollectionPath('users'));
              batch.set(newDocRef, {
                 no, nama, jabatan, username, password, role: 'user'
@@ -1477,12 +1535,14 @@ function AdminDataPegawai({ employees, currentUser }) {
        }
        await batch.commit();
        alert(`Berhasil import ${count} data pegawai.`);
+       // Jalankan renumber setelah import massal
+       setTimeout(() => renumberAllEmployees(), 2000);
     };
     reader.readAsText(file);
   };
 
   const downloadTemplate = () => {
-    const csvContent = "data:text/csv;charset=utf-8,NO,NAMA,JABATAN\n1,Contoh Nama Pegawai,Staf";
+    const csvContent = "data:text/csv;charset=utf-8,NO,NAMA,JABATAN\n1,Contoh Nama Pegawai,Staf\n2,\"Nama, Gelar\",Kepala Seksi";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -1504,48 +1564,124 @@ function AdminDataPegawai({ employees, currentUser }) {
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.username || !form.password) {
-       alert('Username dan Password wajib diisi untuk login pegawai.');
+       alert('Username dan Password wajib diisi.');
        return;
     }
-    if (currentUser.role === 'operator' && form.role === 'admin') {
-       alert('Operator tidak diizinkan membuat Admin.');
-       return;
+
+    try {
+      if (isEditing) {
+         await updateDoc(doc(getCollectionPath('users'), isEditing), form);
+      } else {
+         // LOGIKA BARU: Jika sedang INSERT (Sisip)
+         // Kita simpan dulu dengan nomor sementara (misal: "5.5" jika disisip setelah no 5)
+         // Nanti fungsi renumberAllEmployees akan merapikannya jadi integer
+         await addDoc(getCollectionPath('users'), { ...form });
+      }
+      
+      setForm({ nama: '', jabatan: '', role: 'user', username: '', password: '', no: '' });
+      setIsEditing(null);
+      setIsInserting(null);
+
+      // JALANKAN AUTO RENUMBER SETELAH SIMPAN
+      // Beri jeda sedikit agar Firestore sempat menyimpan data baru
+      setTimeout(() => {
+         renumberAllEmployees();
+      }, 1000);
+
+    } catch (err) {
+       console.error(err);
+       alert('Terjadi kesalahan saat menyimpan data.');
     }
-    if (isEditing) {
-       await updateDoc(doc(getCollectionPath('users'), isEditing), form);
-    } else {
-       await addDoc(getCollectionPath('users'), { ...form });
-    }
-    resetForm();
+  };
+
+  const handleInsertClick = (referenceEmp) => {
+     // Set mode INSERT
+     setIsInserting(referenceEmp.id);
+     setIsEditing(null);
+     
+     // Buat nomor sementara = (Nomor Referensi) + 0.5
+     // Contoh: Sisip setelah no 5 -> jadi 5.5
+     // Nanti akan diurutkan ulang jadi 6, dan yang lama geser ke 7
+     const tempNo = (parseFloat(referenceEmp.no) + 0.5).toString();
+
+     setForm({ 
+        nama: '', 
+        jabatan: '', 
+        role: 'user', 
+        username: '', 
+        password: '123', // Default pass
+        no: tempNo 
+     });
+     
+     if(formRef.current) formRef.current.scrollIntoView({ behavior: 'smooth' });
   };
 
   const edit = (emp) => {
-    if (currentUser.role === 'operator' && emp.role === 'admin') {
-       alert('Operator tidak dapat mengedit akun Admin.');
-       return;
-    }
     setIsEditing(emp.id);
+    setIsInserting(null);
     setForm(emp);
     if(formRef.current) formRef.current.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const remove = async (id, role) => {
-    if (currentUser.role === 'operator' && role === 'admin') {
-       alert('Operator tidak dapat menghapus akun Admin.');
-       return;
+  const remove = async (id) => {
+    if (confirm('Hapus akun ini?')) {
+       await deleteDoc(doc(getCollectionPath('users'), id));
+       // JALANKAN AUTO RENUMBER SETELAH HAPUS
+       setTimeout(() => {
+          renumberAllEmployees();
+       }, 1000);
     }
-    if (confirm('Hapus akun ini?')) await deleteDoc(doc(getCollectionPath('users'), id));
   };
 
   const resetForm = () => {
     setForm({ nama: '', jabatan: '', role: 'user', username: '', password: '', no: '' });
     setIsEditing(null);
+    setIsInserting(null);
+  };
+  
+  // --- FITUR BULK DELETE (HAPUS MASSAL) ---
+  const handleBulkDelete = async () => {
+      if (!confirm(`Yakin ingin menghapus ${selectedIds.length} pegawai terpilih?`)) return;
+
+      const batch = writeBatch(db);
+      selectedIds.forEach(id => {
+         const docRef = doc(getCollectionPath('users'), id);
+         batch.delete(docRef);
+      });
+
+      try {
+         await batch.commit();
+         setSelectedIds([]); // Reset pilihan
+         // Auto renumber setelah hapus banyak
+         setTimeout(() => renumberAllEmployees(), 1000);
+      } catch (error) {
+         console.error("Error bulk delete:", error);
+         alert("Gagal menghapus data.");
+      }
+  };
+
+  const toggleSelectAll = () => {
+      if (selectedIds.length === sortedEmployees.length) {
+         setSelectedIds([]); // Deselect all
+      } else {
+         setSelectedIds(sortedEmployees.map(e => e.id)); // Select all
+      }
+  };
+
+  const toggleSelectOne = (id) => {
+      if (selectedIds.includes(id)) {
+         setSelectedIds(selectedIds.filter(sid => sid !== id));
+      } else {
+         setSelectedIds([...selectedIds, id]);
+      }
   };
 
   const isReadOnly = currentUser.role === 'pengelola';
+  
+  // Sort tampilan tabel berdasarkan nomor (float/int)
   const sortedEmployees = [...employees].sort((a, b) => {
-     const noA = parseInt(a.no) || 99999;
-     const noB = parseInt(b.no) || 99999;
+     const noA = parseFloat(a.no) || 99999;
+     const noB = parseFloat(b.no) || 99999;
      return noA - noB;
   });
 
@@ -1555,39 +1691,61 @@ function AdminDataPegawai({ employees, currentUser }) {
            <h2 className="text-xl font-bold flex items-center"><Users className="mr-2"/> Data Pegawai</h2>
            {!isReadOnly && (
              <div className="flex gap-2">
-                <button onClick={downloadTemplate} className="bg-gray-500 text-white px-3 py-1.5 rounded hover:bg-gray-600 text-sm flex items-center">
-                   <FileDown size={14} className="mr-1"/> Format
+                {/* Tombol Hapus Massal Muncul jika ada yang dipilih */}
+                {selectedIds.length > 0 && (
+                    <button onClick={handleBulkDelete} className="bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 text-sm flex items-center shadow-sm animate-pulse font-bold">
+                       <Trash2 size={14} className="mr-1"/> Hapus ({selectedIds.length})
+                    </button>
+                )}
+
+                <button onClick={downloadTemplate} className="bg-gray-500 text-white px-3 py-1.5 rounded hover:bg-gray-600 text-sm flex items-center shadow-sm">
+                   <FileDown size={14} className="mr-1"/> Template CSV
                 </button>
-                <label className="bg-green-600 text-white px-3 py-1.5 rounded cursor-pointer hover:bg-green-700 text-sm flex items-center">
-                   <Upload size={14} className="mr-1"/> Import
+                <label className="bg-green-600 text-white px-3 py-1.5 rounded cursor-pointer hover:bg-green-700 text-sm flex items-center shadow-sm">
+                   <Upload size={14} className="mr-1"/> Import Data
                    <input type="file" accept=".csv" hidden onChange={handleImport}/>
                 </label>
-                <button onClick={handleExport} className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm flex items-center">
-                   <Download size={14} className="mr-1"/> Export
+                <button onClick={handleExport} className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm flex items-center shadow-sm">
+                   <Download size={14} className="mr-1"/> Export Data
                 </button>
              </div>
            )}
         </div>
 
         {!isReadOnly ? (
-          <div ref={formRef} className="scroll-mt-20">
-            <form onSubmit={handleSave} className="bg-slate-50 p-4 rounded mb-6 border border-slate-200 grid grid-cols-1 md:grid-cols-6 gap-3">
-               <input placeholder="No" className="p-2 border rounded" value={form.no} onChange={e=>setForm({...form, no: e.target.value})} />
-               <input placeholder="Nama Pegawai" className="p-2 border rounded col-span-2" required value={form.nama} onChange={e=>setForm({...form, nama: e.target.value})} />
-               <input placeholder="Jabatan" className="p-2 border rounded" required value={form.jabatan} onChange={e=>setForm({...form, jabatan: e.target.value})} />
-               <select className="p-2 border rounded" value={form.role} onChange={e=>setForm({...form, role: e.target.value})}>
-                  <option value="user">User</option>
-                  <option value="operator">Operator</option>
-                  <option value="pengelola">Pengelola</option>
-                  {currentUser.role === 'admin' && <option value="admin">Admin</option>}
-               </select>
-               <input placeholder="Username" className="p-2 border rounded bg-yellow-50" required value={form.username} onChange={e=>setForm({...form, username: e.target.value})} />
-               <input placeholder="Password" type="text" className="p-2 border rounded bg-yellow-50 col-span-6 md:col-span-6" required value={form.password} onChange={e=>setForm({...form, password: e.target.value})} />
-               <div className="col-span-6 flex gap-2 mt-2">
-                  <button type="button" onClick={resetForm} className="bg-gray-400 text-white py-2 px-4 rounded font-bold hover:bg-gray-500 flex items-center">
-                     <XCircle size={16} className="mr-1"/> Reset
+          <div ref={formRef} className={`p-4 rounded mb-6 border-l-4 transition-colors ${isInserting ? 'bg-green-50 border-green-500' : 'bg-slate-50 border-blue-500'}`}>
+            <h3 className="font-bold text-sm mb-3">
+               {isEditing ? 'Edit Data Pegawai' : isInserting ? 'Sisip Pegawai Baru' : 'Tambah Pegawai Baru (Paling Bawah)'}
+            </h3>
+            <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-6 gap-3">
+               <div className="col-span-1">
+                  <label className="text-[10px] font-bold uppercase text-slate-500">No Urut</label>
+                  <input className="w-full p-2 border rounded bg-gray-100" readOnly value={form.no} />
+                  <p className="text-[9px] text-gray-500">*Otomatis</p>
+               </div>
+               <div className="col-span-3">
+                  <label className="text-[10px] font-bold uppercase text-slate-500">Nama Pegawai</label>
+                  <input placeholder="Nama Lengkap" className="w-full p-2 border rounded" required value={form.nama} onChange={e=>setForm({...form, nama: e.target.value})} />
+               </div>
+               <div className="col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-slate-500">Jabatan</label>
+                  <input placeholder="Jabatan" className="w-full p-2 border rounded" required value={form.jabatan} onChange={e=>setForm({...form, jabatan: e.target.value})} />
+               </div>
+               
+               <div className="col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-slate-500">Username Login</label>
+                  <input placeholder="Username" className="w-full p-2 border rounded bg-yellow-50" required value={form.username} onChange={e=>setForm({...form, username: e.target.value})} />
+               </div>
+               <div className="col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-slate-500">Password Login</label>
+                  <input placeholder="Password" className="w-full p-2 border rounded bg-yellow-50" required value={form.password} onChange={e=>setForm({...form, password: e.target.value})} />
+               </div>
+
+               <div className="col-span-2 flex items-end gap-2">
+                  <button type="button" onClick={resetForm} className="bg-gray-400 text-white py-2 px-4 rounded font-bold hover:bg-gray-500">Batal</button>
+                  <button className={`flex-1 text-white py-2 rounded font-bold ${isInserting ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                     {isInserting ? 'Sisipkan Data' : isEditing ? 'Simpan Perubahan' : 'Tambah'}
                   </button>
-                  <button className="bg-blue-600 text-white py-2 rounded flex-1 font-bold hover:bg-blue-700">{isEditing ? 'Update Pegawai' : 'Tambah Pegawai'}</button>
                </div>
             </form>
           </div>
@@ -1601,26 +1759,52 @@ function AdminDataPegawai({ employees, currentUser }) {
            <table className="w-full text-sm border">
               <thead className="bg-slate-100">
                  <tr>
+                    {!isReadOnly && (
+                        <th className="p-2 border w-8 text-center">
+                            <input 
+                                type="checkbox" 
+                                onChange={toggleSelectAll} 
+                                checked={selectedIds.length === sortedEmployees.length && sortedEmployees.length > 0}
+                            />
+                        </th>
+                    )}
                     <th className="p-2 border w-10">No</th>
                     <th className="p-2 border text-left">Nama</th>
                     <th className="p-2 border text-left">Jabatan</th>
                     <th className="p-2 border text-left">Role</th>
-                    {!isReadOnly && <th className="p-2 border w-24">Aksi</th>}
+                    {!isReadOnly && <th className="p-2 border w-32">Aksi</th>}
                  </tr>
               </thead>
               <tbody>
                  {sortedEmployees.map((emp, i) => (
-                    <tr key={emp.id} className="hover:bg-slate-50">
-                       <td className="p-2 border text-center">{emp.no || '-'}</td>
+                    <tr key={emp.id} className={`hover:bg-slate-50 ${isInserting === emp.id ? 'bg-green-50 border-b-2 border-green-500' : ''} ${selectedIds.includes(emp.id) ? 'bg-blue-50' : ''}`}>
+                       {!isReadOnly && (
+                           <td className="p-2 border text-center">
+                               <input 
+                                   type="checkbox" 
+                                   checked={selectedIds.includes(emp.id)} 
+                                   onChange={() => toggleSelectOne(emp.id)}
+                                   disabled={currentUser.role === 'operator' && emp.role === 'admin'} 
+                               />
+                           </td>
+                       )}
+                       <td className="p-2 border text-center font-bold">{emp.no}</td>
                        <td className="p-2 border font-medium">{emp.nama}</td>
                        <td className="p-2 border">{emp.jabatan}</td>
                        <td className="p-2 border uppercase text-xs font-bold">{emp.role}</td>
                        {!isReadOnly && (
-                         <td className="p-2 border text-center">
+                         <td className="p-2 border text-center flex justify-center gap-1">
                             {!(currentUser.role === 'operator' && emp.role === 'admin') && (
                                <>
-                                  <button onClick={()=>edit(emp)} className="text-blue-600 mx-1"><Edit size={16}/></button>
-                                  <button onClick={()=>remove(emp.id, emp.role)} className="text-red-600 mx-1"><Trash2 size={16}/></button>
+                                  <button onClick={()=>handleInsertClick(emp)} className="text-green-600 hover:bg-green-100 p-1 rounded" title="Sisip data di bawah ini">
+                                     <ArrowDownCircle size={16}/>
+                                  </button>
+                                  <button onClick={()=>edit(emp)} className="text-blue-600 hover:bg-blue-100 p-1 rounded" title="Edit">
+                                     <Edit size={16}/>
+                                  </button>
+                                  <button onClick={()=>remove(emp.id)} className="text-red-600 hover:bg-red-100 p-1 rounded" title="Hapus">
+                                     <Trash2 size={16}/>
+                                  </button>
                                </>
                             )}
                          </td>
@@ -1634,6 +1818,7 @@ function AdminDataPegawai({ employees, currentUser }) {
   );
 }
 
+// ... AdminSettings, AdminDashboard, dll ...
 function AdminSettings({ settings, holidays, employees, user }) {
   const [tab, setTab] = useState('setup');
   const [formSet, setFormSet] = useState(settings);
@@ -1913,6 +2098,8 @@ function UserRow({ targetUser, currentUser, onSave, isReadOnly }) {
       </tr>
    );
 }
+
+// ... (Sisa komponen lainnya UserAbsensi, UserLaporanStatus, UserRekapan, dll. tetap sama)
 
 function UserAbsensi({ user, attendance, holidays }) {
   const [form, setForm] = useState({ date: getTodayString(), session: 'Pagi', status: 'Hadir' });
